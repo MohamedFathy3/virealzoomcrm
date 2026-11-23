@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Save, Loader2, Trash2 } from 'lucide-react';
 import { WalletCards } from 'lucide-react';
@@ -20,36 +20,107 @@ function useSubmit(url: string, success = 'تم الحفظ بنجاح', method: 
 
 function Message({ value }: { value: string }) { return value ? <p className={`mt-3 text-xs font-bold ${value.startsWith('تم') ? 'text-[#217a5a]' : 'text-[#af3f53]'}`}>{value}</p> : null; }
 
-type ClientServiceOption = { id: string; name: string; description: string | null; defaultPrice: number; adBudgetAmount?: number };
+type ClientServiceOption = { id: string; name: string; description: string | null; adBudgetAmount?: number; isActive?: boolean };
+
+type ClientServiceSelectionFieldsProps = {
+  services: ClientServiceOption[];
+  selectedServiceIds: string[];
+  setSelectedServiceIds: Dispatch<SetStateAction<string[]>>;
+  servicePrices: Record<string, string>;
+  setServicePrices: Dispatch<SetStateAction<Record<string, string>>>;
+  adBudgetAmounts: Record<string, string>;
+  setAdBudgetAmounts: Dispatch<SetStateAction<Record<string, string>>>;
+};
+
+function ClientServiceSelectionFields({
+  services,
+  selectedServiceIds,
+  setSelectedServiceIds,
+  servicePrices,
+  setServicePrices,
+  adBudgetAmounts,
+  setAdBudgetAmounts,
+}: ClientServiceSelectionFieldsProps) {
+  const totalCents = selectedServiceIds.reduce(
+    (sum, serviceId) => sum + Math.round((Number(servicePrices[serviceId]) || 0) * 100),
+    0
+  );
+
+  return <fieldset className="space-y-3 rounded-xl border border-[#eeeaf4] p-3">
+    <legend className="px-1 text-xs font-black text-[#241744]">الخدمات والأسعار المتفق عليها</legend>
+    <p className="text-[11px] leading-5 text-[#8a8396]">اختَر الخدمات واكتب السعر المتفق عليه لكل خدمة. الإجمالي يُحسب تلقائيًا، وتُنشأ الاشتراكات بالقيم نفسها عند الحفظ.</p>
+    {services.length ? <div className="space-y-2">{services.map(service => {
+      const selected = selectedServiceIds.includes(service.id);
+      const agreedPrice = servicePrices[service.id] ?? '';
+      const maxAdBudget = agreedPrice !== '' && Number.isFinite(Number(agreedPrice)) ? Number(agreedPrice) : undefined;
+
+      return <div key={service.id} className="rounded-lg bg-[#faf9fc] p-3">
+        <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-[#625c6d]">
+          <input type="checkbox" checked={selected} onChange={event => {
+            const checked = event.currentTarget.checked;
+            setSelectedServiceIds(current => checked
+              ? current.includes(service.id) ? current : [...current, service.id]
+              : current.filter(id => id !== service.id));
+            setServicePrices(current => {
+              const next = { ...current };
+              if (checked) next[service.id] ??= '';
+              else delete next[service.id];
+              return next;
+            });
+            setAdBudgetAmounts(current => {
+              const next = { ...current };
+              if (checked) next[service.id] ??= '';
+              else delete next[service.id];
+              return next;
+            });
+          }} className="accent-[#6d4bc3]" />
+          <span>{service.name}{service.isActive === false && <span className="mr-1 text-[10px] text-[#a26a12]">(خدمة غير مفعّلة)</span>}</span>
+        </label>
+        {selected && <div className="mt-3 space-y-3">
+          {service.description && <p className="text-[11px] leading-5 text-[#8a8396]">{service.description}</p>}
+          <label className="block space-y-1">
+            <span className="label">السعر المتفق عليه للخدمة (ج.م) *</span>
+            <input type="number" required min="0" max="9999999999.99" step="0.01" value={agreedPrice} onChange={event => setServicePrices(current => ({ ...current, [service.id]: event.target.value }))} className="input" placeholder="اكتب السعر المتفق عليه" />
+          </label>
+          {isAdvertisingPurchaseService(service.name) && <label className="block space-y-1">
+            <span className="label">ميزانية الإعلانات من سعر الخدمة (اختياري)</span>
+            <input type="number" min="0" max={maxAdBudget} step="0.01" value={adBudgetAmounts[service.id] ?? ''} onChange={event => setAdBudgetAmounts(current => ({ ...current, [service.id]: event.target.value }))} className="input" placeholder="0.00" />
+            <span className="text-[10px] text-[#8a8396]">تُخصم هذه الميزانية من السعر المتفق عليه وتُضاف لمحفظة إعلانات العميل عند تسجيل الدفعة.</span>
+          </label>}
+        </div>}
+      </div>;
+    })}</div> : <p className="text-xs text-[#8a8396]">لا توجد خدمات مفعّلة في الكتالوج.</p>}
+    {selectedServiceIds.length > 0 && <div className="flex items-center justify-between gap-3 border-t border-[#eeeaf4] pt-3 text-xs">
+      <span className="font-bold text-[#625c6d]">إجمالي الأسعار المتفق عليها</span>
+      <strong className="text-base font-black text-[#6245ad]">{currencyPrecise(totalCents / 100)}</strong>
+    </div>}
+  </fieldset>;
+}
 
 export function ClientForm({ services }: { services: ClientServiceOption[] }) {
   const { loading, message, submit } = useSubmit('/api/clients', 'تمت إضافة العميل وتوليد كوده');
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
-  const [proposalTotal, setProposalTotal] = useState('');
+  const [servicePrices, setServicePrices] = useState<Record<string, string>>({});
   const [adBudgetAmounts, setAdBudgetAmounts] = useState<Record<string, string>>({});
-  const catalogTotalCents = services
-    .filter(service => selectedServiceIds.includes(service.id))
-    .reduce((sum, service) => sum + Math.round(service.defaultPrice * 100), 0);
-  const proposalTotalCents = Math.round((Number(proposalTotal) || 0) * 100);
-  const adjustmentCents = proposalTotalCents - catalogTotalCents;
-  return <form onSubmit={async e => {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const raw = Object.fromEntries([...form.entries()].filter(([name]) => !['nextFollowUpAt', 'selectedServiceIds', 'proposalTotal'].includes(name)));
+
+  return <form onSubmit={async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const raw = Object.fromEntries([...form.entries()].filter(([name]) => !['nextFollowUpAt', 'selectedServiceIds'].includes(name)));
     const serviceSelections = selectedServiceIds.map(serviceId => ({
       serviceId,
+      agreedPrice: Number(servicePrices[serviceId]),
       adBudgetAmount: Number(adBudgetAmounts[serviceId]) || 0
     }));
     const ok = await submit({
       ...raw,
       serviceSelections,
-      proposalTotal: serviceSelections.length ? form.get('proposalTotal') : undefined,
       nextFollowUpAt: form.get('nextFollowUpAt') || undefined
     });
     if (ok) {
-      e.currentTarget.reset();
+      event.currentTarget.reset();
       setSelectedServiceIds([]);
-      setProposalTotal('');
+      setServicePrices({});
       setAdBudgetAmounts({});
     }
   }} className="space-y-3">
@@ -62,45 +133,23 @@ export function ClientForm({ services }: { services: ClientServiceOption[] }) {
       <label className="space-y-1"><span className="label">العنوان</span><input name="address" className="input" placeholder="عنوان العميل" /></label>
       <label className="space-y-1"><span className="label">مصدر العميل</span><select name="source" className="input"><option value="">اختر المصدر</option><option>إحالة</option><option>إعلان</option><option>موقع إلكتروني</option><option>تواصل مباشر</option></select></label>
     </div>
-    <label className="space-y-1 block"><span className="label">الحالة</span><select name="status" className="input"><option value="POTENTIAL">محتمل</option><option value="ACTIVE">نشط</option><option value="PAUSED">متوقف مؤقتًا</option></select></label>
-    <fieldset className="space-y-2 rounded-xl border border-[#eeeaf4] p-3">
-      <legend className="px-1 text-xs font-black text-[#241744]">الخدمات وعرض السعر</legend>
-      <p className="text-[11px] text-[#8a8396]">اختر الخدمات وأدخل الإجمالي النهائي؛ عند حفظ العميل تُنشأ اشتراكات الخدمات تلقائيًا.</p>
-      {services.length ? <div className="space-y-2">{services.map(service => {
-        const selected = selectedServiceIds.includes(service.id);
-        return <div key={service.id} className="rounded-lg bg-[#faf9fc] p-3">
-          <label className="flex cursor-pointer items-center justify-between gap-3 text-xs font-bold text-[#625c6d]"><span className="flex items-center gap-2"><input type="checkbox" name="selectedServiceIds" value={service.id} checked={selected} onChange={event => {
-            const checked = event.currentTarget.checked;
-            const nextIds = checked ? [...selectedServiceIds, service.id] : selectedServiceIds.filter(id => id !== service.id);
-            setSelectedServiceIds(nextIds);
-            setAdBudgetAmounts(current => {
-              const next = { ...current };
-              if (!checked) delete next[service.id];
-              else if (isAdvertisingPurchaseService(service.name)) next[service.id] = service.defaultPrice.toFixed(2);
-              return next;
-            });
-            const nextCatalogCents = services.filter(item => nextIds.includes(item.id)).reduce((sum, item) => sum + Math.round(item.defaultPrice * 100), 0);
-            const currentAdjustmentCents = proposalTotalCents - catalogTotalCents;
-            setProposalTotal((Math.max(0, nextCatalogCents + currentAdjustmentCents) / 100).toFixed(2));
-          }} className="accent-[#6d4bc3]" />{service.name}</span>{selected && <span className="font-black text-[#241744]">{currencyPrecise(service.defaultPrice)}</span>}</label>
-          {selected && service.description && <p className="mt-2 text-[11px] leading-5 text-[#8a8396]">{service.description}</p>}
-          {selected && isAdvertisingPurchaseService(service.name) && <label className="mt-3 block space-y-1"><span className="label">الميزانية المخصصة للإعلانات من سعر الخدمة</span><input type="number" min="0" max={service.defaultPrice} step="0.01" value={adBudgetAmounts[service.id] ?? service.defaultPrice.toFixed(2)} onChange={event => setAdBudgetAmounts(current => ({ ...current, [service.id]: event.target.value }))} className="input" /><span className="text-[10px] text-[#8a8396]">تقدر تخصص كامل سعر الخدمة أو جزءًا منه؛ يُضاف لمحفظة الإعلانات عند تسجيل الدفعة.</span></label>}
-        </div>;
-      })}</div> : <p className="text-xs text-[#8a8396]">لا توجد خدمات مفعّلة في الكتالوج.</p>}
-      {selectedServiceIds.length > 0 && <div className="space-y-2 border-t border-[#eeeaf4] pt-3">
-        <div className="flex justify-between gap-3 text-xs"><span className="text-[#625c6d]">إجمالي أسعار الكتالوج</span><span className="font-bold">{currencyPrecise(catalogTotalCents / 100)}</span></div>
-        <label className="block space-y-1"><span className="label">الإجمالي النهائي للعرض</span><input type="number" min="0" max="9999999999.99" step="0.01" name="proposalTotal" required value={proposalTotal} onChange={event => setProposalTotal(event.target.value)} className="input font-black" /></label>
-        {adjustmentCents < 0 && <p className="text-[11px] font-bold text-[#217a5a]">الخصم الإجمالي: {currencyPrecise(Math.abs(adjustmentCents) / 100)}</p>}
-        {adjustmentCents > 0 && <p className="text-[11px] font-bold text-[#a26a12]">الزيادة الإجمالية (داخلية): {currencyPrecise(adjustmentCents / 100)}</p>}
-      </div>}
-    </fieldset>
-    <label className="space-y-1 block"><span className="label">ملاحظات</span><textarea name="notes" className="input" placeholder="ملاحظات مختصرة عن العميل" /></label>
+    <label className="block space-y-1"><span className="label">الحالة</span><select name="status" className="input"><option value="POTENTIAL">محتمل</option><option value="ACTIVE">نشط</option><option value="PAUSED">متوقف مؤقتًا</option></select></label>
+    <ClientServiceSelectionFields
+      services={services}
+      selectedServiceIds={selectedServiceIds}
+      setSelectedServiceIds={setSelectedServiceIds}
+      servicePrices={servicePrices}
+      setServicePrices={setServicePrices}
+      adBudgetAmounts={adBudgetAmounts}
+      setAdBudgetAmounts={setAdBudgetAmounts}
+    />
+    <label className="block space-y-1"><span className="label">ملاحظات</span><textarea name="notes" className="input" placeholder="ملاحظات مختصرة عن العميل" /></label>
     <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1"><span className="label">موعد المتابعة</span><input type="datetime-local" name="nextFollowUpAt" className="input" /></label><label className="space-y-1"><span className="label">سبب المتابعة</span><input name="followUpNote" className="input" placeholder="اتصال / عرض سعر..." /></label></div>
     <button className="btn btn-primary w-full" disabled={loading}>{loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} حفظ العميل</button><Message value={message} />
   </form>;
 }
 
-type ClientEditService = ClientServiceOption & { isActive: boolean };
+type ClientEditService = ClientServiceOption;
 type ClientEditDetails = {
   id: string;
   name: string;
@@ -114,19 +163,21 @@ type ClientEditDetails = {
   notes: string;
   nextFollowUpAt: Date | null;
   followUpNote: string;
-  proposalTotal: number | null;
   serviceIds: string[];
+  servicePrices: Record<string, number>;
 };
 
 export function ClientEditForm({ client, services }: { client: ClientEditDetails; services: ClientEditService[] }) {
   const { loading, message, submit } = useSubmit(`/api/clients/${client.id}`, 'تم تحديث بيانات العميل', 'PATCH');
   const [editing, setEditing] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState(client.serviceIds);
-  const [proposalTotal, setProposalTotal] = useState(client.proposalTotal?.toFixed(2) ?? '');
+  const [servicePrices, setServicePrices] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(client.servicePrices).map(([serviceId, price]) => [serviceId, price.toFixed(2)]))
+  );
   const [adBudgetAmounts, setAdBudgetAmounts] = useState<Record<string, string>>(() =>
     Object.fromEntries(services
       .filter(service => client.serviceIds.includes(service.id) && isAdvertisingPurchaseService(service.name))
-      .map(service => [service.id, (service.adBudgetAmount ?? service.defaultPrice).toFixed(2)]))
+      .map(service => [service.id, (service.adBudgetAmount ?? 0).toFixed(2)]))
   );
   useEffect(() => {
     const openEditor = () => setEditing(true);
@@ -141,10 +192,6 @@ export function ClientEditForm({ client, services }: { client: ClientEditDetails
       window.removeEventListener('open-client-edit', openEditor);
     };
   }, []);
-  const catalogTotalCents = services
-    .filter(service => selectedServiceIds.includes(service.id))
-    .reduce((sum, service) => sum + Math.round(service.defaultPrice * 100), 0);
-  const adjustmentCents = Math.round((Number(proposalTotal) || 0) * 100) - catalogTotalCents;
   const followUpDate = client.nextFollowUpAt
     ? new Date(client.nextFollowUpAt.getTime() - client.nextFollowUpAt.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
     : '';
@@ -158,14 +205,14 @@ export function ClientEditForm({ client, services }: { client: ClientEditDetails
       event.preventDefault();
       const form = event.currentTarget;
       const values = new FormData(form);
-      const raw = Object.fromEntries([...values.entries()].filter(([name]) => !['serviceIds', 'proposalTotal', 'nextFollowUpAt'].includes(name)));
+      const raw = Object.fromEntries([...values.entries()].filter(([name]) => !['serviceIds', 'nextFollowUpAt'].includes(name)));
       await submit({
         ...raw,
         serviceSelections: selectedServiceIds.map(serviceId => ({
           serviceId,
+          agreedPrice: Number(servicePrices[serviceId]),
           adBudgetAmount: Number(adBudgetAmounts[serviceId]) || 0
         })),
-        proposalTotal: selectedServiceIds.length ? values.get('proposalTotal') : undefined,
         nextFollowUpAt: values.get('nextFollowUpAt') || undefined
       });
     }} className="mt-5 space-y-4">
@@ -182,42 +229,15 @@ export function ClientEditForm({ client, services }: { client: ClientEditDetails
         <label className="space-y-1"><span className="label">سبب المتابعة</span><input name="followUpNote" defaultValue={client.followUpNote} className="input" /></label>
       </div>
       <label className="block space-y-1"><span className="label">ملاحظات العميل</span><textarea name="notes" defaultValue={client.notes} className="input" /></label>
-
-      <fieldset className="space-y-2 rounded-xl border border-[#eeeaf4] p-3">
-        <legend className="px-1 text-xs font-black text-[#241744]">الخدمات وعرض السعر</legend>
-        {services.length ? services.map(service => {
-          const selected = selectedServiceIds.includes(service.id);
-          return <div key={service.id} className="rounded-lg bg-[#faf9fc] p-3">
-            <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
-              <span className="flex items-center gap-2"><input type="checkbox" checked={selected} onChange={event => {
-                const checked = event.currentTarget.checked;
-                const nextIds = checked
-                  ? [...selectedServiceIds, service.id]
-                  : selectedServiceIds.filter(id => id !== service.id);
-                setSelectedServiceIds(nextIds);
-                setAdBudgetAmounts(current => {
-                  const next = { ...current };
-                  if (!checked) delete next[service.id];
-                  else if (isAdvertisingPurchaseService(service.name) && next[service.id] === undefined) {
-                    next[service.id] = (service.adBudgetAmount ?? service.defaultPrice).toFixed(2);
-                  }
-                  return next;
-                });
-                const nextCatalogCents = services.filter(item => nextIds.includes(item.id)).reduce((sum, item) => sum + Math.round(item.defaultPrice * 100), 0);
-                setProposalTotal((Math.max(0, nextCatalogCents + adjustmentCents) / 100).toFixed(2));
-              }} className="accent-[#6d4bc3]" />{service.name}{!service.isActive && <span className="text-[10px] text-[#a26a12]">(خدمة غير مفعّلة)</span>}</span>
-              {selected && <span className="font-black text-[#241744]">{currencyPrecise(service.defaultPrice)}</span>}
-            </label>
-            {selected && isAdvertisingPurchaseService(service.name) && <label className="mt-3 block space-y-1"><span className="label">الميزانية المخصصة للإعلانات من سعر الخدمة</span><input type="number" min="0" max={service.defaultPrice} step="0.01" value={adBudgetAmounts[service.id] ?? service.defaultPrice.toFixed(2)} onChange={event => setAdBudgetAmounts(current => ({ ...current, [service.id]: event.target.value }))} className="input" /><span className="text-[10px] text-[#8a8396]">تقدر تخصص كامل سعر الخدمة أو جزءًا منه؛ يُضاف لمحفظة الإعلانات عند تسجيل الدفعة.</span></label>}
-          </div>;
-        }) : <p className="text-xs text-[#8a8396]">لا توجد خدمات متاحة.</p>}
-        {selectedServiceIds.length > 0 && <div className="space-y-2 border-t border-[#eeeaf4] pt-3">
-          <div className="flex justify-between gap-3 text-xs"><span className="text-[#625c6d]">إجمالي أسعار الكتالوج</span><span className="font-bold">{currencyPrecise(catalogTotalCents / 100)}</span></div>
-          <label className="block space-y-1"><span className="label">الإجمالي النهائي للعرض</span><input type="number" min="0" max="9999999999.99" step="0.01" name="proposalTotal" required value={proposalTotal} onChange={event => setProposalTotal(event.target.value)} className="input font-black" /></label>
-          {adjustmentCents < 0 && <p className="text-[11px] font-bold text-[#217a5a]">الخصم الإجمالي: {currencyPrecise(Math.abs(adjustmentCents) / 100)}</p>}
-          {adjustmentCents > 0 && <p className="text-[11px] font-bold text-[#a26a12]">الزيادة الإجمالية (داخلية): {currencyPrecise(adjustmentCents / 100)}</p>}
-        </div>}
-      </fieldset>
+      <ClientServiceSelectionFields
+        services={services}
+        selectedServiceIds={selectedServiceIds}
+        setSelectedServiceIds={setSelectedServiceIds}
+        servicePrices={servicePrices}
+        setServicePrices={setServicePrices}
+        adBudgetAmounts={adBudgetAmounts}
+        setAdBudgetAmounts={setAdBudgetAmounts}
+      />
       <div className="flex justify-end"><button className="btn btn-primary" disabled={loading}>{loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} حفظ التعديلات</button></div>
       <Message value={message} />
     </form>}
@@ -536,7 +556,7 @@ export function TaskWorkflowActions({ taskId, isAssigned, canReview, status, sub
   </div>;
 }
 
-type ServiceFormDetails = { id: string; name: string; description: string | null; category: string | null; defaultPrice: number; durationDays: number };
+type ServiceFormDetails = { id: string; name: string; description: string | null; category: string | null; durationDays: number };
 
 export function ServiceForm({ service }: { service?: ServiceFormDetails }) {
   const { loading, message, submit } = useSubmit('/api/services', service ? 'تم تحديث الخدمة' : 'تم إنشاء الخدمة', service ? 'PATCH' : 'POST');
@@ -547,7 +567,7 @@ export function ServiceForm({ service }: { service?: ServiceFormDetails }) {
     {open && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#150b20]/55 p-4" onClick={() => setOpen(false)}>
       <div role="dialog" aria-modal="true" aria-labelledby="new-service-title" className="card w-full max-w-lg p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between gap-3">
-          <div><h2 id="new-service-title" className="text-lg font-black text-[#241744]">{service ? 'تعديل خدمة الكتالوج' : 'إضافة خدمة للكتالوج'}</h2><p className="muted mt-1 text-xs">مدة الخدمة تُستخدم تلقائيًا عند إنشاء اشتراك للعميل.</p></div>
+          <div><h2 id="new-service-title" className="text-lg font-black text-[#241744]">{service ? 'تعديل خدمة الكتالوج' : 'إضافة خدمة للكتالوج'}</h2><p className="muted mt-1 text-xs">سعر الخدمة يُحدّد عند إضافتها لملف العميل حسب الاتفاق، والمدة تُستخدم عند إنشاء الاشتراك.</p></div>
           <button type="button" onClick={() => setOpen(false)} className="btn btn-ghost min-h-9 px-3" aria-label="إغلاق">×</button>
         </div>
         <form onSubmit={async event => {
@@ -562,8 +582,8 @@ export function ServiceForm({ service }: { service?: ServiceFormDetails }) {
         }} className="space-y-3">
           <label className="block space-y-1"><span className="label">اسم الخدمة *</span><input name="name" required minLength={2} maxLength={191} defaultValue={service?.name} className="input" placeholder="مثال: إدارة صفحات التواصل" /></label>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1"><span className="label">السعر الافتراضي بالجنيه *</span><input type="number" name="defaultPrice" min="0" max="9999999999.99" step="0.01" required defaultValue={service?.defaultPrice} className="input" placeholder="0.00" /></label>
             <label className="space-y-1"><span className="label">مدة الاشتراك بالأيام *</span><input type="number" name="durationDays" min="1" max="3650" step="1" required defaultValue={service?.durationDays ?? 30} className="input" /></label>
+            <div className="flex items-center rounded-xl bg-[#faf9fc] p-3 text-xs font-bold text-[#6d4bc3]">السعر حسب الاتفاق مع كل عميل</div>
           </div>
           <label className="block space-y-1"><span className="label">التصنيف</span><input name="category" maxLength={191} defaultValue={service?.category || ''} className="input" placeholder="تسويق، تصميم..." /></label>
           <label className="block space-y-1"><span className="label">وصف الخدمة</span><textarea name="description" maxLength={5000} defaultValue={service?.description || ''} className="input" placeholder="تفاصيل مختصرة عما تتضمنه الخدمة" /></label>

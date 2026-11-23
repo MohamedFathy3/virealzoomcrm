@@ -25,7 +25,7 @@ export default async function ClientsPage() {
       orderBy: [{ nextFollowUpAt: 'asc' }, { updatedAt: 'desc' }],
       include: { _count: { select: { subscriptions: true, tasks: true } }, createdBy: { select: { name: true } } }
     }),
-    prisma.service.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, description: true, defaultPrice: true } })
+    prisma.service.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, description: true } })
   ]);
   const canCreate = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN' ||
     Boolean(employee && isSalesDepartment(employee.department.name)) ||
@@ -57,7 +57,7 @@ export default async function ClientsPage() {
           </tr>) : <tr><td colSpan={canEditClients ? 6 : 5}><div className="py-16 text-center"><UsersRound className="mx-auto mb-3 text-[#c8bfdb]" /><div className="font-extrabold text-[#241744]">لا يوجد عملاء بعد</div></div></td></tr>}
         </tbody></table></div>
       </div>
-      {canCreate && <div id="new-client" className="card card-pad"><SectionTitle eyebrow="NEW CLIENT" title="إضافة عميل" description="سجّل احتياجات العميل وموعد المتابعة التالي." /><ClientForm services={services.map(service => ({ ...service, defaultPrice: Number(service.defaultPrice) }))} /></div>}
+      {canCreate && <div id="new-client" className="card card-pad"><SectionTitle eyebrow="NEW CLIENT" title="إضافة عميل" description="سجّل احتياجات العميل والسعر المتفق عليه لكل خدمة وموعد المتابعة التالي." /><ClientForm services={services} /></div>}
     </div>
   </div></AppShell>;
 }

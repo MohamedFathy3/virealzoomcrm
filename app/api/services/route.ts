@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireUser(['SUPER_ADMIN', 'ADMIN']);
     const parsed = serviceSchema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: 'راجع اسم الخدمة وسعرها' }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ error: 'راجع اسم الخدمة ومدتها' }, { status: 400 });
 
     const category = parsed.data.category?.trim() || null;
     const duplicate = await prisma.service.findFirst({
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
         name: parsed.data.name,
         description: parsed.data.description?.trim() || null,
         category,
-        defaultPrice: parsed.data.defaultPrice,
+        defaultPrice: parsed.data.defaultPrice ?? 0,
         durationDays: parsed.data.durationDays
       }
     });
@@ -45,7 +45,7 @@ export async function PATCH(request: Request) {
     const parsed = serviceSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: 'راجع بيانات الخدمة ومدتها' }, { status: 400 });
 
-    const current = await prisma.service.findUnique({ where: { id: body.id }, select: { id: true } });
+    const current = await prisma.service.findUnique({ where: { id: body.id }, select: { id: true, defaultPrice: true } });
     if (!current) return NextResponse.json({ error: 'الخدمة غير موجودة' }, { status: 404 });
     const category = parsed.data.category?.trim() || null;
     const duplicate = await prisma.service.findFirst({
@@ -60,7 +60,7 @@ export async function PATCH(request: Request) {
         name: parsed.data.name,
         description: parsed.data.description?.trim() || null,
         category,
-        defaultPrice: parsed.data.defaultPrice,
+        defaultPrice: parsed.data.defaultPrice ?? Number(current.defaultPrice),
         durationDays: parsed.data.durationDays
       }
     });

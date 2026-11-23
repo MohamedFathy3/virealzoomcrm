@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const clientServiceSelectionSchema = z.object({
   serviceId: z.string().min(1),
+  agreedPrice: z.coerce.number().finite().nonnegative().max(9999999999.99)
+    .refine(amount => Math.abs(amount * 100 - Math.round(amount * 100)) < 0.000001, 'سعر الخدمة يجب ألا يتجاوز منزلتين عشريتين'),
   adBudgetAmount: z.coerce.number().finite().nonnegative().max(9999999999.99)
     .refine(amount => Math.abs(amount * 100 - Math.round(amount * 100)) < 0.000001, 'ميزانية الإعلانات يجب ألا تتجاوز منزلتين عشريتين')
     .default(0)
@@ -19,18 +21,15 @@ export const clientSchema = z.object({
   notes: z.string().optional(),
   nextFollowUpAt: z.string().optional(),
   followUpNote: z.string().optional(),
-  proposalTotal: z.coerce.number().finite().nonnegative().max(9999999999.99).optional(),
   serviceSelections: z.array(clientServiceSelectionSchema).max(25).default([])
 }).superRefine((data, context) => {
   const serviceIds = data.serviceSelections.map(selection => selection.serviceId);
   if (new Set(serviceIds).size !== serviceIds.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['serviceSelections'], message: 'لا يمكن اختيار الخدمة أكثر من مرة' });
   }
-  if (data.serviceSelections.length > 0 && data.proposalTotal === undefined) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['proposalTotal'], message: 'إجمالي العرض مطلوب للخدمات المختارة' });
-  }
-  if (data.serviceSelections.length === 0 && data.proposalTotal !== undefined) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ['proposalTotal'], message: 'اختر خدمة قبل إدخال إجمالي العرض' });
+  const totalCents = data.serviceSelections.reduce((sum, selection) => sum + Math.round(selection.agreedPrice * 100), 0);
+  if (totalCents > 999999999999) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['serviceSelections'], message: 'إجمالي أسعار الخدمات أكبر من الحد المسموح' });
   }
 });
 
@@ -38,7 +37,7 @@ export const serviceSchema = z.object({
   name: z.string().trim().min(2).max(191),
   description: z.string().max(5000).optional(),
   category: z.string().max(191).optional(),
-  defaultPrice: z.coerce.number().finite().nonnegative().max(9999999999.99),
+  defaultPrice: z.coerce.number().finite().nonnegative().max(9999999999.99).optional(),
   durationDays: z.coerce.number().int().positive().max(3650).default(30)
 });
 

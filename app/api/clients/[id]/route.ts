@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { clientSchema } from '@/lib/validators';
 import { getEmployeeDepartment, isSalesDepartment } from '@/lib/team-access';
-import { allocateContractTotalByCatalogPrice, getSubscriptionExpirationDate, syncClientSubscriptionPayments } from '@/lib/client-contracts';
+import { getSubscriptionExpirationDate, syncClientSubscriptionPayments } from '@/lib/client-contracts';
 import { isAdvertisingPurchaseService } from '@/lib/client-ad-budget';
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,7 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       select: {
         id: true,
         createdById: true,
-        serviceInterests: { select: { serviceId: true, catalogPrice: true, adBudgetAmount: true, serviceDescription: true } },
+        serviceInterests: { select: { serviceId: true, catalogPrice: true, finalPrice: true, adBudgetAmount: true, serviceDescription: true } },
         subscriptions: { select: { id: true, serviceId: true, startDate: true, status: true } }
       }
     });
@@ -38,7 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'غير مصرح بتعديل هذا العميل' }, { status: 403 });
     }
 
-    const { nextFollowUpAt, proposalTotal, serviceSelections, ...data } = parsed.data;
+    const { nextFollowUpAt, serviceSelections, ...data } = parsed.data;
     const followUpDate = nextFollowUpAt ? new Date(nextFollowUpAt) : null;
     if (followUpDate && Number.isNaN(followUpDate.getTime())) {
       return NextResponse.json({ error: 'موعد المتابعة غير صحيح' }, { status: 400 });
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const services = serviceIds.length
       ? await prisma.service.findMany({
         where: { id: { in: serviceIds } },
-        select: { id: true, name: true, description: true, defaultPrice: true, isActive: true, durationDays: true }
+        select: { id: true, name: true, description: true, isActive: true, durationDays: true }
       })
       : [];
     if (services.length !== serviceIds.length) {
@@ -64,21 +64,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (selection.adBudgetAmount > 0 && !isAdvertisingPurchaseService(service.name)) {
         return NextResponse.json({ error: 'ميزانية الإعلانات مسموحة لخدمة شراء الإعلانات فقط' }, { status: 400 });
       }
-      const savedPrice = existingInterests.get(service.id)?.catalogPrice;
-      const servicePrice = savedPrice === null || savedPrice === undefined ? Number(service.defaultPrice) : Number(savedPrice);
-      if (Math.round(selection.adBudgetAmount * 100) > Math.round(servicePrice * 100)) {
+      if (Math.round(selection.adBudgetAmount * 100) > Math.round(selection.agreedPrice * 100)) {
         return NextResponse.json({ error: 'ميزانية الإعلانات لا يمكن أن تتجاوز سعر الخدمة' }, { status: 400 });
       }
     }
     const newInterests = services
       .filter(service => !existingInterests.has(service.id))
-      .map(service => ({
-        clientId: id,
-        serviceId: service.id,
-        catalogPrice: Math.round(Number(service.defaultPrice) * 100) / 100,
-        adBudgetAmount: serviceSelections.find(selection => selection.serviceId === service.id)?.adBudgetAmount ?? 0,
-        serviceDescription: service.description
-      }));
+      .map(service => {
+        const selection = serviceSelections.find(item => item.serviceId === service.id);
+        if (!selection) throw new Error('SERVICE_SELECTION_MISMATCH');
+        return {
+          clientId: id,
+          serviceId: service.id,
+          catalogPrice: null,
+          finalPrice: Math.round(selection.agreedPrice * 100) / 100,
+          adBudgetAmount: selection.adBudgetAmount,
+          serviceDescription: service.description
+        };
+      });
     const requestedAdBudget = serviceSelections.reduce((sum, selection) => sum + selection.adBudgetAmount, 0);
       const paidAdBudget = await prisma.clientPayment.aggregate({
         where: { clientId: id },
@@ -87,14 +90,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (requestedAdBudget < Number(paidAdBudget._sum.adBudgetAmount ?? 0)) {
         return NextResponse.json({ error: 'لا يمكن تقليل ميزانية الإعلانات عن المبلغ الذي تم إيداعه بالفعل' }, { status: 409 });
       }
-    const catalogPrices: number[] = [];
-    for (const serviceId of serviceIds) {
-      const service = services.find(item => item.id === serviceId);
-      if (!service) return NextResponse.json({ error: 'توجد خدمة غير متاحة ضمن الاختيارات' }, { status: 400 });
-      const savedPrice = existingInterests.get(serviceId)?.catalogPrice;
-      catalogPrices.push(savedPrice === null || savedPrice === undefined ? Number(service.defaultPrice) : Number(savedPrice));
-    }
-    const contractValues = allocateContractTotalByCatalogPrice(proposalTotal ?? 0, catalogPrices);
+    const proposalTotal = serviceSelections.reduce((sum, selection) => sum + Math.round(selection.agreedPrice * 100), 0) / 100;
 
     await prisma.$transaction(async tx => {
       await tx.client.update({
@@ -128,7 +124,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         if (existingInterests.has(selection.serviceId)) {
           await tx.clientServiceInterest.updateMany({
             where: { clientId: id, serviceId: selection.serviceId },
-            data: { adBudgetAmount: selection.adBudgetAmount }
+            data: { adBudgetAmount: selection.adBudgetAmount, finalPrice: Math.round(selection.agreedPrice * 100) / 100 }
           });
         }
       }
@@ -161,26 +157,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         amountPaid: number;
         outstanding: number;
       }> = [];
-      for (const [index, serviceId] of serviceIds.entries()) {
+      for (const serviceId of serviceIds) {
         const service = services.find(item => item.id === serviceId);
-        if (!service) throw new Error('SERVICE_SELECTION_MISMATCH');
+        const selection = serviceSelections.find(item => item.serviceId === serviceId);
+        if (!service || !selection) throw new Error('SERVICE_SELECTION_MISMATCH');
+        const agreedPrice = Math.round(selection.agreedPrice * 100) / 100;
         const activeSubscription = subscriptionsByService.get(serviceId);
         if (activeSubscription && !toCancel.some(item => item.id === activeSubscription.id)) {
           await tx.subscription.update({
             where: { id: activeSubscription.id },
-            data: { contractValue: contractValues[index] }
+            data: { contractValue: agreedPrice }
           });
         } else {
           const startDate = new Date();
           subscriptionsToCreate.push({
             clientId: id,
             serviceId,
-            contractValue: contractValues[index],
+            contractValue: agreedPrice,
             startDate,
             durationDays: service.durationDays,
             expirationDate: getSubscriptionExpirationDate(startDate, service.durationDays),
             amountPaid: 0,
-            outstanding: contractValues[index]
+            outstanding: agreedPrice
           });
         }
       }

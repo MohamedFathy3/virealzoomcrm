@@ -85,12 +85,14 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
   const proposalTotal = client.proposalTotal === null ? legacyProposalTotal : Number(client.proposalTotal);
   const hasPrintableQuote = client.serviceInterests.length > 0 && proposalTotal !== null;
   const activeSubscriptions = client.subscriptions.filter(subscription => subscription.status !== 'CANCELLED');
-  const expectedContractValues = proposalTotal === null
-    ? []
-    : allocateContractTotalByCatalogPrice(
-      proposalTotal,
-      client.serviceInterests.map(interest => Number(interest.catalogPrice ?? interest.service.defaultPrice))
-    );
+  const expectedContractValues = client.serviceInterests.every(interest => interest.finalPrice !== null)
+    ? client.serviceInterests.map(interest => Number(interest.finalPrice))
+    : proposalTotal === null
+      ? []
+      : allocateContractTotalByCatalogPrice(
+        proposalTotal,
+        client.serviceInterests.map(interest => Number(interest.catalogPrice ?? interest.service.defaultPrice))
+      );
   const expectedValuesByServiceId = new Map(client.serviceInterests.map((interest, index) => [interest.serviceId, expectedContractValues[index]]));
   const hasMisallocatedContract = proposalTotal !== null && (
     activeSubscriptions.length !== client.serviceInterests.length ||
@@ -99,28 +101,26 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
       return !subscription || Math.round(Number(subscription.contractValue) * 100) !== Math.round((expectedValuesByServiceId.get(interest.serviceId) ?? 0) * 100);
     })
   );
-  const catalogTotal = client.serviceInterests.reduce((sum, item) => sum + Number(item.catalogPrice ?? 0), 0);
-  const proposalAdjustment = proposalTotal === null ? 0 : proposalTotal - catalogTotal;
   const editableServices = canEditClient
     ? await prisma.service.findMany({
       where: { OR: [{ isActive: true }, { id: { in: client.serviceInterests.map(item => item.serviceId) } }] },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, description: true, defaultPrice: true, isActive: true }
+      select: { id: true, name: true, description: true, isActive: true }
     })
     : [];
   const editServiceOptions = editableServices.map(service => {
     const interest = client.serviceInterests.find(item => item.serviceId === service.id);
     return {
       ...service,
-      defaultPrice: interest?.catalogPrice === null || interest?.catalogPrice === undefined
-        ? Number(service.defaultPrice)
-        : Number(interest.catalogPrice),
+      agreedPrice: interest?.finalPrice === null || interest?.finalPrice === undefined
+        ? Number(interest?.catalogPrice ?? 0)
+        : Number(interest.finalPrice),
       adBudgetAmount: interest ? Number(interest.adBudgetAmount) : undefined
     };
   });
   return <AppShell user={user}><div className="content"><Link href="/clients" className="mb-5 inline-flex items-center gap-2 text-xs font-bold text-[#6d4bc3]"><ArrowRight size={15} /> العودة للعملاء</Link>
     <div className="card card-pad mb-5"><div className="flex flex-wrap items-start justify-between gap-5"><div className="flex items-start gap-4"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#241744] text-lg font-black text-white">{client.name.slice(0, 2)}</div><div><div className="eyebrow">{client.clientCode}</div><h1 className="mt-1 text-2xl font-black text-[#241744]">{client.name}</h1><p className="muted mt-1">{client.companyName || 'ملف عميل مستقل'} · أُضيف {date(client.registeredAt)} · المسؤول: {client.createdBy?.name || 'الإدارة'}</p><div className="mt-3"><StatusBadge status={client.status} /></div></div></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{canAccessFinance(user.role) && <div className="rounded-xl bg-[#faf9fc] p-3"><div className="label">المتبقي</div><div className="mt-1 text-lg font-black text-[#a26a12]">{currency(outstanding)}</div></div>}{canAccessFinance(user.role) && <div className="rounded-xl bg-[#faf9fc] p-3"><div className="label">رصيد الإعلانات</div><div className="mt-1 text-lg font-black text-[#2e6aa3]">{currency(adBalance)}</div></div>}<div className="rounded-xl bg-[#faf9fc] p-3"><div className="label">المهام</div><div className="mt-1 text-lg font-black text-[#6245ad]">{client.tasks.length}</div></div></div></div><div className="mt-6 flex flex-wrap gap-4 border-t border-[#f0edf5] pt-4 text-xs text-[#625c6d]"><span className="inline-flex items-center gap-2"><Phone size={14} className="text-[#6d4bc3]" />{client.phone || 'بدون هاتف'}</span><span className="inline-flex items-center gap-2"><Mail size={14} className="text-[#6d4bc3]" />{client.email || 'بدون بريد'}</span><span className="inline-flex items-center gap-2"><MapPin size={14} className="text-[#6d4bc3]" />{client.address || 'بدون عنوان'}</span></div></div>
-    {canEditClient && <ClientEditForm client={{ id: client.id, name: client.name, companyName: client.companyName || '', phone: client.phone || '', email: client.email || '', businessActivity: client.businessActivity || '', address: client.address || '', source: client.source || '', status: client.status, notes: client.notes || '', nextFollowUpAt: client.nextFollowUpAt, followUpNote: client.followUpNote || '', proposalTotal: proposalTotal ?? (client.serviceInterests.length ? catalogTotal : null), serviceIds: client.serviceInterests.map(item => item.serviceId) }} services={editServiceOptions} />}
+    {canEditClient && <ClientEditForm client={{ id: client.id, name: client.name, companyName: client.companyName || '', phone: client.phone || '', email: client.email || '', businessActivity: client.businessActivity || '', address: client.address || '', source: client.source || '', status: client.status, notes: client.notes || '', nextFollowUpAt: client.nextFollowUpAt, followUpNote: client.followUpNote || '', serviceIds: client.serviceInterests.map(item => item.serviceId), servicePrices: Object.fromEntries(client.serviceInterests.map(item => [item.serviceId, Number(item.finalPrice ?? item.catalogPrice ?? item.service.defaultPrice)])) }} services={editServiceOptions} />}
     <div className="mb-5 grid gap-5 xl:grid-cols-2">
       <div className="card card-pad"><SectionTitle eyebrow="FOLLOW-UP" title="حالة العميل والتذكير" /><ClientFollowUpForm client={{ id: client.id, status: client.status, nextFollowUpAt: client.nextFollowUpAt, followUpNote: client.followUpNote }} /></div>
       {(salesEmployee || salesManager) && <div className="card card-pad"><SectionTitle eyebrow="ADVERTISING BUDGET" title="إيداع ميزانية إضافية" description="ميزانية خدمة شراء الإعلانات تنتقل تلقائيًا للمحفظة عند تحصيل الدفعات؛ استخدم هذا النموذج لأي إيداع إضافي." /><SalesRevenueForm clientId={client.id} /></div>}
@@ -132,9 +132,7 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
           <div className="text-[11px] font-black text-[#625c6d]">الخدمات المختارة في العرض المبدئي</div>
           {client.serviceInterests.map(interest => <div key={interest.serviceId} className="rounded-xl bg-[#faf9fc] p-3"><div className="font-extrabold text-[#241744]">{interest.service.name}</div><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-[#756f82]">{interest.serviceDescription || interest.service.description || 'لا توجد تفاصيل للخدمة.'}</p>{canViewProposalPrices && Number(interest.adBudgetAmount) > 0 && <div className="mt-2 text-[10px] font-bold text-[#2e6aa3]">المخصص من سعر الخدمة لميزانية الإعلانات: {currencyPrecise(interest.adBudgetAmount)}</div>}</div>)}
           {canViewProposalPrices && proposalTotal !== null && <div className="space-y-1 rounded-xl border border-[#eeeaf4] p-3 text-xs">
-            <div className="flex justify-between gap-3"><span className="text-[#625c6d]">إجمالي أسعار الكتالوج</span><span>{currencyPrecise(catalogTotal)}</span></div>
-            {proposalAdjustment < 0 && <div className="flex justify-between gap-3 text-[#217a5a]"><span>الخصم الإجمالي</span><span>{currencyPrecise(Math.abs(proposalAdjustment))}</span></div>}
-            {proposalAdjustment > 0 && <div className="flex justify-between gap-3 text-[#a26a12]"><span>الزيادة الإجمالية (داخلية)</span><span>{currencyPrecise(proposalAdjustment)}</span></div>}
+            {client.serviceInterests.map(interest => <div key={interest.serviceId} className="flex justify-between gap-3"><span className="text-[#625c6d]">{interest.service.name}</span><span>{interest.finalPrice === null ? '—' : currencyPrecise(interest.finalPrice)}</span></div>)}
             <div className="flex justify-between gap-3 border-t border-[#eeeaf4] pt-2 font-black text-[#6245ad]"><span>الإجمالي النهائي</span><span>{currencyPrecise(proposalTotal)}</span></div>
           </div>}
         </div>}
@@ -145,7 +143,7 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
             {[...paymentsByMethod].map(([method, total]) => <div key={method} className="flex justify-between gap-3 text-xs"><span className="text-[#625c6d]">{method}</span><span className="font-bold text-[#241744]">{currencyPrecise(total)}</span></div>)}
           </div> : <p className="mt-3 border-t border-[#eeeaf4] pt-3 text-xs text-[#8a8396]">لا توجد تحصيلات خدمات مسجلة حتى الآن.</p>}
           {(salesEmployee || salesManager || canAccessFinance(user.role)) && client.status === 'ACTIVE' && outstanding > 0 && <div className="mt-4 border-t border-[#eeeaf4] pt-4"><ClientPaymentForm clientId={client.id} outstanding={outstanding} remainingAdBudget={remainingAdBudget} payments={servicePayments} canDelete={canManageClientPayments} /></div>}
-          {canManageClientPayments && hasMisallocatedContract && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#eeeaf4] pt-4"><p className="text-xs text-[#8a8396]">أسعار الاشتراكات الحالية لا تطابق توزيع أسعار الكتالوج. افتح التعديل واحفظ لتصحيحها.</p><ClientEditShortcut label="تصحيح توزيع الأسعار" className="btn btn-ghost" /></div>}
+          {canManageClientPayments && hasMisallocatedContract && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#eeeaf4] pt-4"><p className="text-xs text-[#8a8396]">قيم الاشتراكات لا تطابق الأسعار المتفق عليها للخدمات. افتح التعديل واحفظ لتصحيحها.</p><ClientEditShortcut label="تصحيح الأسعار" className="btn btn-ghost" /></div>}
           {canManageClientPayments && client.status === 'ACTIVE' && outstanding <= 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#eeeaf4] pt-4"><p className="text-xs text-[#8a8396]">{hasActiveSubscriptions ? 'تم سداد كامل قيمة الاشتراكات الحالية.' : hasPrintableQuote ? 'لا توجد اشتراكات جاهزة لاستقبال دفعة. احفظ بيانات العميل لتجهيز اشتراكاته.' : 'اختر خدمات للعميل واحفظها قبل تسجيل الدفعة.'}</p>{!hasActiveSubscriptions && <ClientEditShortcut label={hasPrintableQuote ? 'تجهيز الاشتراكات' : 'اختيار الخدمات'} />}</div>}
           {canManageClientPayments && client.status !== 'ACTIVE' && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[#eeeaf4] pt-3"><p className="text-xs font-bold text-[#a26a12]">حوّل حالة العميل إلى «نشط» أولًا لتسجيل الدفعة.</p><ClientEditShortcut label="تعديل حالة العميل" className="btn btn-ghost" /></div>}
         </div>}

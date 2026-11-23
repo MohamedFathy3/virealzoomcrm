@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth';
 import { clientFollowUpSchema, clientSchema } from '@/lib/validators';
 import { code } from '@/lib/ids';
 import { getEmployeeDepartment, isSalesDepartment } from '@/lib/team-access';
-import { allocateContractTotalByCatalogPrice, getSubscriptionExpirationDate } from '@/lib/client-contracts';
+import { getSubscriptionExpirationDate } from '@/lib/client-contracts';
 import { isAdvertisingPurchaseService } from '@/lib/client-ad-budget';
 
 export async function POST(request: Request) {
@@ -18,62 +18,62 @@ export async function POST(request: Request) {
     }
     const parsed = clientSchema.safeParse(await request.json());
     if (!parsed.success) return NextResponse.json({ error: 'بيانات العميل غير مكتملة' }, { status: 400 });
-    const { nextFollowUpAt, proposalTotal, serviceSelections, ...clientData } = parsed.data;
+    const { nextFollowUpAt, serviceSelections, ...clientData } = parsed.data;
     const followUpDate = nextFollowUpAt ? new Date(nextFollowUpAt) : null;
     if (followUpDate && Number.isNaN(followUpDate.getTime())) return NextResponse.json({ error: 'تاريخ المتابعة غير صحيح' }, { status: 400 });
     const services = serviceSelections.length
-      ? await prisma.service.findMany({ where: { id: { in: serviceSelections.map(selection => selection.serviceId) }, isActive: true }, select: { id: true, name: true, description: true, defaultPrice: true, durationDays: true } })
+      ? await prisma.service.findMany({ where: { id: { in: serviceSelections.map(selection => selection.serviceId) }, isActive: true }, select: { id: true, name: true, description: true, durationDays: true } })
       : [];
     if (services.length !== serviceSelections.length) return NextResponse.json({ error: 'توجد خدمة غير متاحة ضمن الاختيارات' }, { status: 400 });
     const serviceInterestData: Array<{
       serviceId: string;
-      catalogPrice: number;
+      catalogPrice: null;
+      finalPrice: number;
       adBudgetAmount: number;
       serviceDescription: string | null;
     }> = [];
     for (const selection of serviceSelections) {
       const service = services.find(item => item.id === selection.serviceId);
       if (!service) return NextResponse.json({ error: 'توجد خدمة غير متاحة ضمن الاختيارات' }, { status: 400 });
-      const catalogCents = Math.round(Number(service.defaultPrice) * 100);
+      const agreedPriceCents = Math.round(selection.agreedPrice * 100);
       if (selection.adBudgetAmount > 0 && !isAdvertisingPurchaseService(service.name)) {
         return NextResponse.json({ error: 'ميزانية الإعلانات مسموحة لخدمة شراء الإعلانات فقط' }, { status: 400 });
       }
-      if (Math.round(selection.adBudgetAmount * 100) > catalogCents) {
+      if (Math.round(selection.adBudgetAmount * 100) > agreedPriceCents) {
         return NextResponse.json({ error: 'ميزانية الإعلانات لا يمكن أن تتجاوز سعر الخدمة' }, { status: 400 });
       }
       serviceInterestData.push({
         serviceId: selection.serviceId,
-        catalogPrice: catalogCents / 100,
+        catalogPrice: null,
+        finalPrice: agreedPriceCents / 100,
         adBudgetAmount: selection.adBudgetAmount,
         serviceDescription: service.description
       });
     }
+    const proposalTotal = serviceSelections.reduce((sum, selection) => sum + Math.round(selection.agreedPrice * 100), 0) / 100;
     const client = await prisma.$transaction(async tx => {
       const created = await tx.client.create({
-        data: { ...clientData, clientCode: code('CL'), createdById: user.id, nextFollowUpAt: followUpDate, proposalTotal: proposalTotal ?? null }
+        data: { ...clientData, clientCode: code('CL'), createdById: user.id, nextFollowUpAt: followUpDate, proposalTotal: serviceSelections.length ? proposalTotal : null }
       });
       if (serviceInterestData.length) {
         await tx.clientServiceInterest.createMany({
           data: serviceInterestData.map(item => ({ ...item, clientId: created.id }))
         });
         const startDate = new Date();
-        const contractValues = allocateContractTotalByCatalogPrice(
-          proposalTotal ?? 0,
-          serviceInterestData.map(item => item.catalogPrice)
-        );
         await tx.subscription.createMany({
           data: serviceSelections.map((selection, index) => {
             const service = services.find(item => item.id === selection.serviceId);
             if (!service) throw new Error('SERVICE_SELECTION_MISMATCH');
+            const agreedPrice = Math.round(selection.agreedPrice * 100) / 100;
             return {
               clientId: created.id,
               serviceId: service.id,
-              contractValue: contractValues[index],
+              contractValue: agreedPrice,
               startDate,
               durationDays: service.durationDays,
               expirationDate: getSubscriptionExpirationDate(startDate, service.durationDays),
               amountPaid: 0,
-              outstanding: contractValues[index]
+              outstanding: agreedPrice
             };
           })
         });
