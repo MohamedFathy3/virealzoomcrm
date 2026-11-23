@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/with-tls.mjs next dev -H 0.0.0.0 -p 3000",
     "build": "prisma generate && next build",
-    "start": "node scripts/with-tls.mjs next start -H 0.0.0.0 -p ${PORT:-3000}",
+    "start": "node scripts/with-tls.mjs next start -H 0.0.0.0 -p ${PORT:-3006}",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "db:generate": "prisma generate",
