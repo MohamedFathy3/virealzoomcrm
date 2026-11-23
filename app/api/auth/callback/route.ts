@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
+import { redirectToPath } from '@/lib/redirect';
 
 export async function GET(request: Request) {
-  return NextResponse.redirect(new URL('/login', request.url));
+  return redirectToPath('/login', 307);
 }
