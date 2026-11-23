@@ -1,0 +1,462 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  DEPARTMENT_MANAGER
+  EMPLOYEE
+}
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  INACTIVE
+  POTENTIAL
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  INACTIVE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRING
+  EXPIRED
+  CANCELLED
+}
+
+enum FinanceType {
+  SERVICE_REVENUE
+  ADDITIONAL_REVENUE
+  OPERATING_EXPENSE
+  EMPLOYEE_SALARY
+  DIRECT_CLIENT_COST
+  MARKETING_EXPENSE
+  OTHER_EXPENSE
+}
+
+enum AdTransactionType {
+  FUNDS_RECEIVED
+  CAMPAIGN_SPENDING
+  REFUND
+  ADJUSTMENT
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  NEW
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  UNDER_REVIEW
+  REVISION_REQUIRED
+  APPROVED
+  CANCELLED
+}
+
+enum ReviewDecision {
+  APPROVED
+  REVISION_REQUIRED
+  REJECTED
+}
+
+model User {
+  id          String   @id @default(cuid())
+  openId      String   @unique
+  email       String   @unique
+  name        String
+  passwordHash String?
+  role        Role     @default(EMPLOYEE)
+  isActive    Boolean  @default(true)
+  employee    Employee?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdClients       Client[]             @relation("ClientCreatedBy")
+  createdTransactions  FinanceTransaction[] @relation("TransactionCreatedBy")
+  clientPayments       ClientPayment[]      @relation("ClientPaymentCreatedBy")
+  createdTasks         Task[]               @relation("TaskCreatedBy")
+  submissions          TaskSubmission[]     @relation("SubmittedBy")
+  reviews              TaskReview[]         @relation("ReviewedBy")
+  notifications        Notification[]
+  auditLogs             AuditLog[]
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  managerId   String?  @unique
+  manager     Employee? @relation("DepartmentManager", fields: [managerId], references: [id])
+  employees   Employee[] @relation("DepartmentEmployees")
+  tasks       Task[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Employee {
+  id              String           @id @default(cuid())
+  employeeCode    String           @unique
+  fullName        String
+  email           String           @unique
+  phone           String?
+  jobTitle        String?
+  hireDate        DateTime?
+  monthlySalary   Decimal          @db.Decimal(12, 2)
+  employmentStatus EmploymentStatus @default(ACTIVE)
+  userId          String?          @unique
+  user            User?            @relation(fields: [userId], references: [id])
+  departmentId    String
+  department      Department       @relation("DepartmentEmployees", fields: [departmentId], references: [id])
+  managedDepartment Department?    @relation("DepartmentManager")
+  assignedTasks   Task[]           @relation("PrimaryAssignee")
+  collaborations  TaskAssignment[]
+  financeTransactions FinanceTransaction[]
+  productivityRecords ProductivityRecord[]
+  payrollItems    PayrollItem[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model Client {
+  id              String           @id @default(cuid())
+  clientCode      String           @unique
+  name            String
+  companyName     String?
+  phone           String?
+  email           String?
+  businessActivity String?
+  address         String?
+  source          String?
+  status          ClientStatus     @default(POTENTIAL)
+  notes           String?
+  nextFollowUpAt  DateTime?
+  followUpNote    String?          @db.Text
+  proposalTotal   Decimal?         @db.Decimal(12, 2)
+  registeredAt    DateTime         @default(now())
+  createdById     String?
+  createdBy       User?            @relation("ClientCreatedBy", fields: [createdById], references: [id])
+  subscriptions   Subscription[]
+  serviceInterests ClientServiceInterest[]
+  transactions    FinanceTransaction[]
+  payments        ClientPayment[]
+  adWallets       AdWallet[]
+  tasks           Task[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  @@index([status])
+  @@index([registeredAt])
+}
+
+model Service {
+  id            String         @id @default(cuid())
+  name          String
+  description   String?
+  defaultPrice  Decimal        @db.Decimal(12, 2)
+  durationDays  Int            @default(30)
+  category      String?
+  isActive      Boolean        @default(true)
+  subscriptions Subscription[]
+  interestedClients ClientServiceInterest[]
+  tasks         Task[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  @@unique([name, category])
+}
+
+model ClientServiceInterest {
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  serviceId         String
+  service           Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  catalogPrice      Decimal? @db.Decimal(12, 2)
+  discountPercent   Decimal? @db.Decimal(5, 2)
+  increaseAmount    Decimal? @db.Decimal(12, 2)
+  finalPrice        Decimal? @db.Decimal(12, 2)
+  adBudgetAmount    Decimal   @default(0) @db.Decimal(12, 2)
+  serviceDescription String?  @db.Text
+  createdAt         DateTime @default(now())
+
+  @@id([clientId, serviceId])
+  @@index([serviceId])
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  clientId         String
+  client            Client             @relation(fields: [clientId], references: [id])
+  serviceId        String
+  service          Service            @relation(fields: [serviceId], references: [id])
+  contractValue    Decimal            @db.Decimal(12, 2)
+  startDate        DateTime
+  durationDays     Int
+  expirationDate   DateTime
+  paymentTerms     String?
+  amountPaid       Decimal            @default(0) @db.Decimal(12, 2)
+  outstanding      Decimal            @db.Decimal(12, 2)
+  status           SubscriptionStatus @default(ACTIVE)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  @@index([expirationDate])
+  @@index([clientId, status])
+}
+
+model FinanceTransaction {
+  id              String      @id @default(cuid())
+  transactionNo   String      @unique
+  type            FinanceType
+  amount          Decimal     @db.Decimal(12, 2)
+  date            DateTime
+  paymentMethod   String?
+  category        String?
+  description     String?
+  clientId        String?
+  client          Client?     @relation(fields: [clientId], references: [id])
+  employeeId      String?
+  employee        Employee?   @relation(fields: [employeeId], references: [id])
+  createdById     String
+  createdBy       User        @relation("TransactionCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime    @default(now())
+  clientPayment   ClientPayment?
+  @@index([type, date])
+  @@index([clientId])
+}
+
+model ClientPayment {
+  id                    String             @id @default(cuid())
+  paymentNo             String             @unique
+  clientId              String
+  client                Client             @relation(fields: [clientId], references: [id])
+  amount                Decimal            @db.Decimal(12, 2)
+  serviceRevenueAmount  Decimal            @default(0) @db.Decimal(12, 2)
+  adBudgetAmount        Decimal            @default(0) @db.Decimal(12, 2)
+  date                  DateTime
+  paymentMethod         String
+  createdById           String
+  createdBy             User               @relation("ClientPaymentCreatedBy", fields: [createdById], references: [id])
+  financeTransactionId  String?            @unique
+  financeTransaction    FinanceTransaction? @relation(fields: [financeTransactionId], references: [id], onDelete: SetNull)
+  createdAt             DateTime           @default(now())
+  @@index([clientId, date])
+}
+
+model AdWallet {
+  id          String           @id @default(cuid())
+  clientId    String
+  client      Client           @relation(fields: [clientId], references: [id])
+  name        String           @default("المحفظة الرئيسية")
+  totalReceived Decimal        @default(0) @db.Decimal(12, 2)
+  totalSpent  Decimal          @default(0) @db.Decimal(12, 2)
+  totalRefunds Decimal         @default(0) @db.Decimal(12, 2)
+  balance     Decimal          @default(0) @db.Decimal(12, 2)
+  campaigns   AdCampaign[]
+  transactions AdTransaction[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  @@index([clientId])
+}
+
+model AdCampaign {
+  id        String   @id @default(cuid())
+  walletId  String
+  wallet    AdWallet @relation(fields: [walletId], references: [id])
+  name      String
+  platform  String?
+  status    String   @default("نشطة")
+  budget    Decimal  @db.Decimal(12, 2)
+  spent     Decimal  @default(0) @db.Decimal(12, 2)
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AdTransaction {
+  id            String            @id @default(cuid())
+  walletId      String
+  wallet        AdWallet          @relation(fields: [walletId], references: [id])
+  type          AdTransactionType
+  amount        Decimal           @db.Decimal(12, 2)
+  description   String?
+  referenceNo   String?
+  createdAt     DateTime          @default(now())
+  @@index([walletId, createdAt])
+}
+
+model Task {
+  id              String       @id @default(cuid())
+  taskNo          String       @unique
+  title           String
+  description     String?      @db.Text
+  clientId        String?
+  client          Client?      @relation(fields: [clientId], references: [id])
+  serviceId       String?
+  service         Service?     @relation(fields: [serviceId], references: [id])
+  departmentId    String
+  department      Department   @relation(fields: [departmentId], references: [id])
+  assigneeId      String?
+  assignee        Employee?    @relation("PrimaryAssignee", fields: [assigneeId], references: [id])
+  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus   @default(NEW)
+  startDate       DateTime?
+  deadline        DateTime
+  estimatedHours  Decimal?     @db.Decimal(8, 2)
+  productivityPoints Int        @default(0)
+  progress        Int          @default(0)
+  createdById     String
+  createdBy       User         @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  assignments     TaskAssignment[]
+  submissions     TaskSubmission[]
+  reviews         TaskReview[]
+  comments        TaskComment[]
+  statusHistory   TaskStatusHistory[]
+  productivityRecords ProductivityRecord[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  @@index([status, deadline])
+  @@index([departmentId])
+  @@index([assigneeId])
+}
+
+model TaskAssignment {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  createdAt  DateTime @default(now())
+  @@unique([taskId, employeeId])
+}
+
+model TaskSubmission {
+  id             String   @id @default(cuid())
+  taskId         String
+  task           Task     @relation(fields: [taskId], references: [id])
+  version        Int
+  completionNotes String?  @db.Text
+  actualHours    Decimal? @db.Decimal(8, 2)
+  submittedById  String
+  submittedBy    User     @relation("SubmittedBy", fields: [submittedById], references: [id])
+  attachments    Json?
+  submittedAt    DateTime @default(now())
+  reviews        TaskReview[]
+  @@unique([taskId, version])
+  @@index([submittedAt])
+}
+
+model TaskReview {
+  id           String         @id @default(cuid())
+  taskId       String
+  task         Task           @relation(fields: [taskId], references: [id])
+  submissionId String?
+  submission   TaskSubmission? @relation(fields: [submissionId], references: [id])
+  reviewerId   String
+  reviewer     User           @relation("ReviewedBy", fields: [reviewerId], references: [id])
+  decision     ReviewDecision
+  comments     String?        @db.Text
+  qualityScore Int?
+  reviewedAt   DateTime       @default(now())
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id])
+  authorId  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model TaskStatusHistory {
+  id        String     @id @default(cuid())
+  taskId    String
+  task      Task       @relation(fields: [taskId], references: [id])
+  from      TaskStatus?
+  to        TaskStatus
+  changedBy String
+  reason    String?
+  createdAt DateTime   @default(now())
+  @@index([taskId, createdAt])
+}
+
+model ProductivityRecord {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  taskId          String
+  task            Task     @relation(fields: [taskId], references: [id])
+  points          Int
+  onTime          Boolean
+  qualityScore    Int?
+  actualHours    Decimal? @db.Decimal(8, 2)
+  estimatedHours Decimal? @db.Decimal(8, 2)
+  recordedAt      DateTime @default(now())
+  @@unique([employeeId, taskId])
+}
+
+model PayrollPeriod {
+  id        String       @id @default(cuid())
+  month     Int
+  year      Int
+  status    String       @default("DRAFT")
+  confirmedAt DateTime?
+  items     PayrollItem[]
+  createdAt DateTime     @default(now())
+  @@unique([month, year])
+}
+
+model PayrollItem {
+  id          String        @id @default(cuid())
+  periodId    String
+  period      PayrollPeriod @relation(fields: [periodId], references: [id])
+  employeeId  String
+  employee    Employee      @relation(fields: [employeeId], references: [id])
+  baseSalary  Decimal       @db.Decimal(12, 2)
+  allowances  Decimal       @default(0) @db.Decimal(12, 2)
+  deductions  Decimal       @default(0) @db.Decimal(12, 2)
+  bonuses     Decimal       @default(0) @db.Decimal(12, 2)
+  netSalary   Decimal       @db.Decimal(12, 2)
+  paymentStatus String      @default("PENDING")
+  paymentDate DateTime?
+  @@unique([periodId, employeeId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  body      String
+  type      String
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, readAt, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  @@index([entity, entityId, createdAt])
+}

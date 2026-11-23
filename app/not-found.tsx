@@ -1,0 +1,2 @@
+import Link from 'next/link';
+export default function NotFound() { return <main className="flex min-h-screen items-center justify-center bg-[#f8f7fb] p-6"><div className="card max-w-md p-8 text-center"><div className="text-5xl font-black text-[#6d4bc3]">404</div><h1 className="mt-3 text-xl font-black text-[#241744]">الصفحة غير موجودة</h1><p className="muted mt-2">الرابط الذي طلبته غير متاح في مساحة العمل.</p><Link className="btn btn-primary mt-6" href="/">العودة للوحة التحكم</Link></div></main>; }

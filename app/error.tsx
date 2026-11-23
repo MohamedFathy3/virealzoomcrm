@@ -1,0 +1,3 @@
+'use client';
+
+export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) { return <main className="flex min-h-screen items-center justify-center bg-[#f8f7fb] p-6"><div className="card max-w-md p-8 text-center"><div className="eyebrow">SYSTEM / RECOVERY</div><h1 className="mt-2 text-2xl font-black text-[#241744]">حدث خطأ غير متوقع</h1><p className="muted mt-3 leading-7">لم نتمكن من تحميل هذه المساحة الآن. جرّب إعادة المحاولة، وإذا استمر الخطأ راجع سجل النظام.</p><button className="btn btn-primary mt-6" onClick={() => reset()}>إعادة المحاولة</button></div></main>; }
