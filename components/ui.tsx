@@ -15,7 +15,9 @@ export function StatusBadge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
     ACTIVE: ['نشط', 'success'], PAUSED: ['متوقف مؤقتًا', 'warning'], INACTIVE: ['غير نشط', 'neutral'], POTENTIAL: ['محتمل', 'purple'],
     NEW: ['جديدة', 'neutral'], ASSIGNED: ['مُسندة', 'purple'], IN_PROGRESS: ['قيد التنفيذ', 'warning'], SUBMITTED: ['مُرسلة', 'purple'], UNDER_REVIEW: ['قيد المراجعة', 'warning'], REVISION_REQUIRED: ['تحتاج تعديل', 'danger'], APPROVED: ['معتمدة', 'success'], CANCELLED: ['ملغاة', 'neutral'],
-    EXPIRING: ['تنتهي قريبًا', 'warning'], EXPIRED: ['منتهية', 'danger'], DRAFT: ['مسودة', 'neutral'], CONFIRMED: ['مؤكدة', 'success']
+    EXPIRING: ['تنتهي قريبًا', 'warning'], EXPIRED: ['منتهية', 'danger'], DRAFT: ['مسودة', 'neutral'], CONFIRMED: ['مؤكدة', 'success'],
+    SERVICE_REVENUE: ['إيراد خدمة', 'success'], ADDITIONAL_REVENUE: ['إيراد إضافي', 'success'], OPERATING_EXPENSE: ['مصروف تشغيلي', 'danger'],
+    EMPLOYEE_SALARY: ['راتب موظف', 'warning'], DIRECT_CLIENT_COST: ['تكلفة مباشرة لعميل', 'warning'], MARKETING_EXPENSE: ['مصروف تسويق', 'danger'], OTHER_EXPENSE: ['مصروف آخر', 'neutral']
   };
   const [label, tone] = map[status] ?? [status, 'neutral'];
   return <span className={`status status-${tone}`}>{label}</span>;
