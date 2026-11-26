@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { decryptSocialCredential, encryptSocialCredential } from '@/lib/social-media-crypto';
-import { getMetaConfig, META_OAUTH_COOKIE, metaGet, verifyMetaOAuthState } from '@/lib/meta-api';
+import { getMetaConfig, META_OAUTH_COOKIE, metaGet, metaSocialMediaReturnUrl, verifyMetaOAuthState } from '@/lib/meta-api';
 import { requireSocialMediaUser } from '@/lib/social-media-server';
 
 export const runtime = 'nodejs';
@@ -15,7 +15,7 @@ type PageInstagramResponse = {
 };
 
 function redirectToSocialMedia(request: Request, code: string, clientId?: string | null) {
-  const target = new URL('/social-media', request.url);
+  const target = metaSocialMediaReturnUrl(request.url);
   target.searchParams.set('meta', code);
   if (clientId) target.searchParams.set('clientId', clientId);
   const response = NextResponse.redirect(target);

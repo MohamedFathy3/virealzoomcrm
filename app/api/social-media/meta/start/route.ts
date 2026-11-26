@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { createMetaOAuthState, getMetaConfig, META_OAUTH_COOKIE, metaAuthorizationUrl } from '@/lib/meta-api';
+import { createMetaOAuthState, getMetaConfig, META_OAUTH_COOKIE, metaAuthorizationUrl, metaSocialMediaReturnUrl } from '@/lib/meta-api';
 import { requireSocialMediaUser } from '@/lib/social-media-server';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
-  const returnUrl = new URL('/social-media', request.url);
+  const returnUrl = metaSocialMediaReturnUrl(request.url);
   try {
     const user = await requireSocialMediaUser();
     const url = new URL(request.url);
     const rawClientId = url.searchParams.get('clientId')?.trim() || null;
     const clientId = rawClientId === 'company' ? null : rawClientId;
     if (clientId && !(await prisma.client.findUnique({ where: { id: clientId }, select: { id: true } }))) {
-      return NextResponse.redirect(new URL('/social-media?meta_error=client_not_found', request.url));
+      returnUrl.searchParams.set('meta_error', 'client_not_found');
+      return NextResponse.redirect(returnUrl);
     }
 
     const config = getMetaConfig();
@@ -33,6 +34,7 @@ export async function GET(request: Request) {
       : message === 'FORBIDDEN' ? 'forbidden'
       : message === 'META_NOT_CONFIGURED' ? 'not_configured'
       : 'setup_error';
-    return NextResponse.redirect(new URL(`${returnUrl.pathname}?meta_error=${code}`, request.url));
+    returnUrl.searchParams.set('meta_error', code);
+    return NextResponse.redirect(returnUrl);
   }
 }

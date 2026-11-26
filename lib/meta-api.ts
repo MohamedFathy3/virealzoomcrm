@@ -122,3 +122,18 @@ export function metaPublicOrigin() {
   }
   return url.origin;
 }
+
+export function metaSocialMediaReturnUrl(requestUrl: string) {
+  const configuredUrl = process.env.META_APP_URL?.trim();
+  if (configuredUrl) {
+    try {
+      const configured = new URL(configuredUrl);
+      if (configured.protocol === 'https:' && !configured.username && !configured.password && !configured.search && !configured.hash) {
+        return new URL('/social-media', configured.origin);
+      }
+    } catch {
+      // Fall back to the incoming request URL if the public origin is not usable.
+    }
+  }
+  return new URL('/social-media', requestUrl);
+}

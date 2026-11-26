@@ -50,7 +50,7 @@ function noticeText(meta?: string | null, metaError?: string | null) {
   }
   const messages: Record<string, string> = {
     cancelled: 'تم إلغاء ربط Meta قبل اكتمال التفويض.',
-    invalid_callback: 'تعذر التحقق من رد Meta. ابدأ عملية الربط من جديد.',
+    invalid_callback: 'وصل رد Meta بدون code أو state. تأكد أن Valid OAuth Redirect URI يطابق META_REDIRECT_URI حرفيًا، ثم ابدأ الربط من زر Meta داخل النظام.',
     state_expired: 'انتهت صلاحية جلسة الربط. ابدأ OAuth مرة أخرى.',
     session_expired: 'انتهت جلسة تسجيل الدخول أثناء ربط Meta. سجّل الدخول ثم ابدأ الربط من جديد.',
     session_changed: 'تغير المستخدم أثناء التفويض. سجّل الدخول بالحساب نفسه ثم أعد الربط.',
