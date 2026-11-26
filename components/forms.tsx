@@ -321,6 +321,7 @@ export function EmployeeForm({ departments }: { departments: { id: string; name:
       <label className="space-y-1"><span className="label">تاريخ التعيين</span><input type="date" name="hireDate" className="input" /></label>
       <label className="space-y-1"><span className="label">كلمة مرور الدخول</span><input type="password" minLength={8} name="password" className="input" placeholder="اختياري لإنشاء حساب" /></label>
     </div>
+    <p className="rounded-xl bg-[#f8f5ff] px-3 py-2 text-[11px] leading-5 text-[#695b84]">لفريق السوشيال: اختَر قسمًا اسمه «سوشيال ميديا». اختر «مدير قسم» لمسؤول الإدارة أو «موظف» لباقي الفريق؛ أعضاء القسم يدخلون إلى التقويم والحسابات.</p>
     <button className="btn btn-primary w-full" disabled={loading}>{loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} حفظ الموظف</button>
     <Message value={message} />
   </form>;

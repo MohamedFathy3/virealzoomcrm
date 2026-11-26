@@ -10,6 +10,8 @@ import { allocateContractTotalByCatalogPrice } from '@/lib/client-contracts';
 import { ClientEditForm, ClientEditShortcut, ClientFollowUpForm, ClientPaymentForm, SalesRevenueForm } from '@/components/forms';
 import { canSeeAllClients, getEmployeeDepartment, isSalesDepartment } from '@/lib/team-access';
 import { canAccessFinance } from '@/lib/permissions';
+import { canAccessSocialMedia } from '@/lib/social-media-access';
+import { SocialMediaClientPanel } from '@/components/social-media-ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,11 +22,25 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
   const employee = user.role === 'EMPLOYEE' ? await getEmployeeDepartment(user.id) : null;
   const manager = user.role === 'DEPARTMENT_MANAGER' ? await getEmployeeDepartment(user.id) : null;
   if (user.role === 'DEPARTMENT_MANAGER' && !manager?.managedDepartment) redirect('/notifications');
-  const canSeeClients = canSeeAllClients(user.role) || Boolean(employee && isSalesDepartment(employee.department.name));
+  const socialMediaUser = canAccessSocialMedia(user.role, user.departmentName);
+  const canSeeClients = canSeeAllClients(user.role) || Boolean(employee && isSalesDepartment(employee.department.name)) || socialMediaUser;
   if (!canSeeClients) redirect('/');
   const client = await prisma.client.findUnique({ where: { id }, include: { createdBy: { select: { id: true, name: true } }, serviceInterests: { include: { service: true }, orderBy: { createdAt: 'desc' } }, subscriptions: { include: { service: true }, orderBy: { expirationDate: 'desc' } }, tasks: { include: { department: true, assignee: true, submissions: { orderBy: { version: 'desc' }, take: 1 } }, orderBy: { updatedAt: 'desc' }, take: 8 }, adWallets: true } });
   if (!client) notFound();
-  if (user.role === 'EMPLOYEE' && client.createdById !== user.id) notFound();
+  if (user.role === 'EMPLOYEE' && client.createdById !== user.id && !socialMediaUser) notFound();
+  const [socialAccounts, socialPosts] = socialMediaUser ? await Promise.all([
+    prisma.socialAccount.findMany({
+      where: { clientId: client.id },
+      orderBy: [{ platform: 'asc' }, { displayName: 'asc' }],
+      select: { id: true, clientId: true, platform: true, displayName: true, username: true, profileUrl: true, notes: true, metaConnectionId: true, client: { select: { id: true, name: true } } }
+    }),
+    prisma.socialPost.findMany({
+      where: { clientId: client.id },
+      orderBy: [{ scheduledAt: 'desc' }, { createdAt: 'desc' }],
+      take: 50,
+      select: { id: true, clientId: true, accountId: true, platform: true, title: true, content: true, scheduledAt: true, status: true, publishedAt: true, publishingAt: true, externalPostId: true, publishError: true, media: true, client: { select: { id: true, name: true } }, account: { select: { id: true, displayName: true, username: true, platform: true, metaConnectionId: true } } }
+    })
+  ]) : [[], []];
   const transactions = canAccessFinance(user.role) ? await prisma.financeTransaction.findMany({ where: { clientId: client.id }, orderBy: { date: 'desc' }, take: 8 }) : [];
   const outstanding = client.subscriptions.reduce((sum, s) => sum + (s.status === 'CANCELLED' ? 0 : Number(s.outstanding)), 0);
   const hasActiveSubscriptions = client.subscriptions.some(subscription => subscription.status !== 'CANCELLED');
@@ -150,6 +166,12 @@ export default async function ClientDetailsPage({ params }: { params: Promise<{ 
         <div className="table-wrap"><table className="table"><thead><tr><th>الخدمة</th>{canAccessFinance(user.role) && <><th>القيمة</th><th>المتبقي</th></>}<th>الانتهاء</th></tr></thead><tbody>{client.subscriptions.length ? client.subscriptions.map(s => <tr key={s.id}><td><div className="flex items-center gap-2"><BriefcaseBusiness size={15} className="text-[#6d4bc3]" /><div><div className="font-extrabold text-[#241744]">{s.service.name}</div><div className="mt-1 text-[10px] text-[#a29aaa]">{s.durationDays} يوم</div></div></div></td>{canAccessFinance(user.role) && <><td className="text-xs font-bold">{currency(s.contractValue)}</td><td className="text-xs font-bold text-[#a26a12]">{currency(s.outstanding)}</td></>}<td><div className="text-xs font-bold">{date(s.expirationDate)}</div><div className="mt-1 text-[10px] text-[#a29aaa]">{relativeDays(s.expirationDate)}</div></td></tr>) : <tr><td colSpan={canAccessFinance(user.role) ? 4 : 2}><div className="py-10 text-center text-xs text-[#8a8396]">لا توجد اشتراكات فعلية لهذا العميل.</div></td></tr>}</tbody></table></div>
       </div>
     <div className="card"><div className="card-pad pb-2"><SectionTitle eyebrow="OPERATIONS" title="مهام العميل وتفاصيل التنفيذ" action={canCreateTask ? <Link href={`/tasks?clientId=${client.id}#new-task`} className="btn btn-primary"><Plus size={15} /> إنشاء مهمة</Link> : undefined} /></div><div className="table-wrap"><table className="table"><thead><tr><th>المهمة</th><th>القسم</th><th>المكلف</th><th>الحالة</th><th>إنجاز / موعد</th></tr></thead><tbody>{client.tasks.length ? client.tasks.map(task => { const latestSubmission = task.submissions[0]; const filesCount = Array.isArray(latestSubmission?.attachments) ? latestSubmission.attachments.length : 0; return <tr key={task.id}><td><Link href={`/tasks/${task.id}`} className="font-extrabold text-[#241744] hover:text-[#6d4bc3]">{task.title}</Link><div className="mt-1 text-[10px] text-[#6d4bc3]">فتح تفاصيل الشغل</div></td><td className="text-xs text-[#625c6d]">{task.department.name}</td><td className="text-xs text-[#625c6d]">{task.assignee?.fullName || '—'}</td><td><StatusBadge status={task.status} /></td><td><div className="max-w-[260px] whitespace-pre-wrap text-xs text-[#625c6d]">{latestSubmission?.completionNotes || 'لم يُسجل تسليم بعد'}</div>{filesCount > 0 && <div className="mt-1 text-[10px] font-bold text-[#6245ad]">{filesCount} ملف / رابط مرفق</div>}<div className="mt-1 text-[10px] text-[#a29aaa]">{date(task.deadline)}</div></td></tr>; }) : <tr><td colSpan={5}><div className="py-10 text-center text-xs text-[#8a8396]">لا توجد مهام مرتبطة.</div></td></tr>}</tbody></table></div></div></div>
+    {socialMediaUser && <SocialMediaClientPanel
+      clientId={client.id}
+      clientName={client.name}
+      accounts={socialAccounts}
+      posts={socialPosts.map(post => ({ ...post, scheduledAt: post.scheduledAt.toISOString(), publishedAt: post.publishedAt?.toISOString() ?? null, publishingAt: post.publishingAt?.toISOString() ?? null }))}
+    />}
     {canAccessFinance(user.role) && <div className="card mt-5"><div className="card-pad pb-2"><SectionTitle eyebrow="FINANCIAL STATEMENT" title="كشف حركات العميل" /></div><div className="table-wrap"><table className="table"><thead><tr><th>التاريخ</th><th>المرجع</th><th>النوع</th><th>المبلغ</th><th>التصنيف</th></tr></thead><tbody>{transactions.length ? transactions.map(t => <tr key={t.id}><td className="text-xs text-[#625c6d]">{date(t.date)}</td><td className="text-xs font-bold text-[#6d4bc3]">{t.transactionNo}</td><td><StatusBadge status={t.type} /></td><td className="font-black text-[#241744]">{currency(t.amount)}</td><td className="text-xs text-[#625c6d]">{t.category || t.description || '—'}</td></tr>) : <tr><td colSpan={5}><div className="py-10 text-center text-xs text-[#8a8396]">لا توجد معاملات مالية مرتبطة.</div></td></tr>}</tbody></table></div></div>}
   </div></AppShell>;
 }
